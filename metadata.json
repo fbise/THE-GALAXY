@@ -1,0 +1,7 @@
+{
+  "name": "Cosmic Gesture Explorer",
+  "description": "An immersive 3D galaxy visualization controlled entirely by your hand gestures using Gemini's vision capabilities.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
