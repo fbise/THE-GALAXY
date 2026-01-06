@@ -39,19 +39,19 @@ const GalaxyCanvas: React.FC<GalaxyCanvasProps> = ({ gesture }) => {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     mountRef.current.appendChild(renderer.domElement);
 
-    const particleCount = 80000;
+    const particleCount = 85000;
     const geometry = new THREE.BufferGeometry();
     const positions = new Float32Array(particleCount * 3);
     const colors = new Float32Array(particleCount * 3);
 
     const params = {
-      radius: 30,
-      branches: 6,
-      spin: 2.0,
-      randomness: 0.45,
-      randomnessPower: 4,
-      innerColor: '#ff9933',
-      outerColor: '#4d79ff'
+      radius: 35,
+      branches: 5,
+      spin: 1.8,
+      randomness: 0.4,
+      randomnessPower: 3,
+      innerColor: '#ffbb33',
+      outerColor: '#3399ff'
     };
 
     const colorInner = new THREE.Color(params.innerColor);
@@ -68,7 +68,7 @@ const GalaxyCanvas: React.FC<GalaxyCanvasProps> = ({ gesture }) => {
       const randomZ = Math.pow(Math.random(), params.randomnessPower) * (Math.random() < 0.5 ? 1 : -1) * params.randomness * radius;
 
       positions[i3] = Math.cos(branchAngle + spinAngle) * radius + randomX;
-      positions[i3 + 1] = randomY * 0.3; // Very flat
+      positions[i3 + 1] = randomY * 0.35;
       positions[i3 + 2] = Math.sin(branchAngle + spinAngle) * radius + randomZ;
 
       const mixedColor = colorInner.clone();
@@ -83,13 +83,13 @@ const GalaxyCanvas: React.FC<GalaxyCanvasProps> = ({ gesture }) => {
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
     const material = new THREE.PointsMaterial({
-      size: 0.05,
+      size: 0.045,
       sizeAttenuation: true,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
       vertexColors: true,
       transparent: true,
-      opacity: 0.8
+      opacity: 0.75
     });
 
     const points = new THREE.Points(geometry, material);
@@ -102,11 +102,11 @@ const GalaxyCanvas: React.FC<GalaxyCanvasProps> = ({ gesture }) => {
       requestRef.current = requestAnimationFrame(animate);
       const s = stateRef.current;
       
-      points.rotation.y += 0.0012; // Natural drift
+      points.rotation.y += 0.0006; // Steady drift
 
-      s.zoom += (s.targetZoom - s.zoom) * 0.05;
-      s.rotX += (s.targetRotX - s.rotX) * 0.05;
-      s.rotY += (s.targetRotY - s.rotY) * 0.05;
+      s.zoom += (s.targetZoom - s.zoom) * 0.04;
+      s.rotX += (s.targetRotX - s.rotX) * 0.04;
+      s.rotY += (s.targetRotY - s.rotY) * 0.04;
 
       camera.position.z = s.zoom;
       points.rotation.x = s.rotX;
@@ -141,25 +141,25 @@ const GalaxyCanvas: React.FC<GalaxyCanvasProps> = ({ gesture }) => {
     const s = stateRef.current;
     switch (gesture) {
       case GalaxyGesture.ZOOM_IN:
-        s.targetZoom = Math.max(10, s.targetZoom - 8);
+        s.targetZoom = Math.max(8, s.targetZoom - 10);
         break;
       case GalaxyGesture.ZOOM_OUT:
-        s.targetZoom = Math.min(150, s.targetZoom + 8);
+        s.targetZoom = Math.min(180, s.targetZoom + 10);
         break;
       case GalaxyGesture.MOVE_LEFT:
-        s.targetRotY -= 0.1;
+        s.targetRotY -= 0.12;
         break;
       case GalaxyGesture.MOVE_RIGHT:
-        s.targetRotY += 0.1;
+        s.targetRotY += 0.12;
         break;
       case GalaxyGesture.MOVE_UP:
-        s.targetRotX -= 0.1;
+        s.targetRotX -= 0.12;
         break;
       case GalaxyGesture.MOVE_DOWN:
-        s.targetRotX += 0.1;
+        s.targetRotX += 0.12;
         break;
       case GalaxyGesture.STOP:
-        s.targetRotY *= 0.5;
+        s.targetRotY *= 0.4;
         s.targetRotX = 0.3;
         break;
       default:

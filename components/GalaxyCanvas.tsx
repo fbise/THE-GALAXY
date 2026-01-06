@@ -1,0 +1,1 @@
+// This file is being moved to root to prevent deployment path resolution errors.

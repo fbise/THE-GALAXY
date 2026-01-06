@@ -4,7 +4,7 @@ import { GoogleGenAI, Type, FunctionDeclaration, LiveServerMessage, Modality } f
 import { GalaxyGesture } from './types';
 import GalaxyCanvas from './GalaxyCanvas';
 
-// --- Helpers ---
+// --- Utils ---
 function decode(base64: string) {
   const binaryString = atob(base64);
   const len = binaryString.length;
@@ -13,24 +13,6 @@ function decode(base64: string) {
     bytes[i] = binaryString.charCodeAt(i);
   }
   return bytes;
-}
-
-async function decodeAudioData(
-  data: Uint8Array,
-  ctx: AudioContext,
-  sampleRate: number,
-  numChannels: number,
-): Promise<AudioBuffer> {
-  const dataInt16 = new Int16Array(data.buffer);
-  const frameCount = dataInt16.length / numChannels;
-  const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
-  for (let channel = 0; channel < numChannels; channel++) {
-    const channelData = buffer.getChannelData(channel);
-    for (let i = 0; i < frameCount; i++) {
-      channelData[i] = dataInt16[i * numChannels + channel] / 32768.0;
-    }
-  }
-  return buffer;
 }
 
 async function blobToBase64(blob: Blob): Promise<string> {
@@ -42,7 +24,6 @@ async function blobToBase64(blob: Blob): Promise<string> {
   });
 }
 
-// --- Gemini Tool Definition ---
 const controlGalaxyFunction: FunctionDeclaration = {
   name: 'controlGalaxy',
   parameters: {
@@ -52,7 +33,7 @@ const controlGalaxyFunction: FunctionDeclaration = {
       gesture: {
         type: Type.STRING,
         enum: Object.values(GalaxyGesture),
-        description: 'The specific gesture detected.',
+        description: 'The specific gesture detected (zoom_in, zoom_out, etc).',
       }
     },
     required: ['gesture'],
@@ -71,19 +52,14 @@ const App: React.FC = () => {
   const sessionRef = useRef<Promise<any> | null>(null);
   const streamingIntervalRef = useRef<number | null>(null);
 
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const outputNodeRef = useRef<GainNode | null>(null);
-  const nextStartTimeRef = useRef<number>(0);
-  const audioSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
-
   const resetSystem = () => {
     cleanup();
     setError(null);
     setIsLoading(false);
     setIsLive(false);
     setCurrentGesture(GalaxyGesture.STOP);
-    // Instead of location.reload(), we just reset the interaction state
-    startInteraction();
+    // Restart logic without browser reload
+    setTimeout(() => startInteraction(), 100);
   };
 
   const startInteraction = async () => {
@@ -97,12 +73,6 @@ const App: React.FC = () => {
 
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-      }
-
-      if (!audioContextRef.current) {
-        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-        outputNodeRef.current = audioContextRef.current.createGain();
-        outputNodeRef.current.connect(audioContextRef.current.destination);
       }
 
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
@@ -127,27 +97,14 @@ const App: React.FC = () => {
                       functionResponses: { id: fc.id, name: fc.name, response: { result: "ok" } }
                     });
                   });
-                  setTimeout(() => setCurrentGesture(GalaxyGesture.STOP), 2500);
+                  setTimeout(() => setCurrentGesture(GalaxyGesture.STOP), 2000);
                 }
               }
-            }
-
-            const base64Audio = message.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
-            if (base64Audio && audioContextRef.current) {
-              const ctx = audioContextRef.current;
-              nextStartTimeRef.current = Math.max(nextStartTimeRef.current, ctx.currentTime);
-              const audioBuffer = await decodeAudioData(decode(base64Audio), ctx, 24000, 1);
-              const source = ctx.createBufferSource();
-              source.buffer = audioBuffer;
-              source.connect(outputNodeRef.current!);
-              source.start(nextStartTimeRef.current);
-              nextStartTimeRef.current += audioBuffer.duration;
-              audioSourcesRef.current.add(source);
             }
           },
           onerror: (e) => {
             console.error('Session Error:', e);
-            setError('System Link Interrupted. Please ensure your camera is authorized.');
+            setError('Interface link lost. Camera or Network failure.');
             setIsLoading(false);
             cleanup();
           },
@@ -159,21 +116,18 @@ const App: React.FC = () => {
         config: {
           responseModalities: [Modality.AUDIO],
           tools: [{ functionDeclarations: [controlGalaxyFunction] }],
-          systemInstruction: `You are a high-precision gesture interface.
-          Analyze video and call 'controlGalaxy' when:
-          - Both hands closer/bigger: zoom_in
-          - Both hands further/smaller: zoom_out
-          - Hand moving left: move_left
-          - Hand moving right: move_right
-          - Hand moving up: move_up
-          - Hand moving down: move_down
-          - Flat hand held still: stop
-          Respond fast. No talking, only tool calls unless specifically asked.`
+          systemInstruction: `You are the Neural Bridge for a Galaxy Simulator.
+          Call 'controlGalaxy' based on these visual cues:
+          - Hands closer: zoom_in
+          - Hands further: zoom_out
+          - Hand sweep: move_left, move_right, move_up, move_down
+          - Hand held flat: stop
+          Be decisive and silent. Only use tool calls.`
         }
       });
       sessionRef.current = sessionPromise;
     } catch (err) {
-      setError('Biometric Camera Access Required.');
+      setError('Neural Core requires Camera authorization to proceed.');
       setIsLoading(false);
     }
   };
@@ -192,7 +146,7 @@ const App: React.FC = () => {
           });
         }
       }, 'image/jpeg', 0.5);
-    }, 500); // 2fps is enough for gesture
+    }, 600);
   };
 
   const cleanup = () => {
@@ -207,158 +161,159 @@ const App: React.FC = () => {
   useEffect(() => cleanup, []);
 
   return (
-    <div className="relative w-full h-screen bg-black text-white overflow-hidden select-none font-sans">
+    <div className="relative w-full h-screen bg-[#010206] text-white overflow-hidden select-none font-sans">
       <GalaxyCanvas gesture={currentGesture} />
 
-      {/* Main UI Layer */}
+      {/* Primary UI HUD */}
       <div className="absolute inset-0 pointer-events-none p-6 md:p-12 flex flex-col justify-between">
         
-        {/* Header */}
+        {/* Top Navigation */}
         <div className="flex justify-between items-start pointer-events-auto">
           <div>
-            <h1 className="text-4xl md:text-6xl font-black tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-orange-400 via-white to-blue-500 italic">
-              NEUROSPACE
+            <h1 className="text-4xl md:text-7xl font-black tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-blue-400 via-white to-orange-400 italic">
+              STELLARIS.
             </h1>
-            <p className="text-[9px] tracking-[0.5em] text-blue-400 font-bold uppercase mt-2 opacity-80">Vision Core Architecture</p>
+            <p className="text-[10px] tracking-[0.7em] text-blue-500 font-black uppercase mt-2 opacity-90 drop-shadow-lg">Biometric Interface</p>
           </div>
           
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-6">
             <button 
               onClick={() => setShowManual(true)}
-              className="p-3 glass-morphism rounded-full hover:bg-white/10 transition-all flex items-center justify-center border border-white/20"
-              title="Help Manual"
+              className="group p-4 glass-morphism rounded-2xl hover:bg-white/10 transition-all border border-white/20 hover:border-blue-500/50"
+              title="Manual"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-blue-400 group-hover:scale-110 transition-transform"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
             </button>
 
             {!isLive ? (
               <button 
                 onClick={startInteraction}
                 disabled={isLoading}
-                className="group px-8 py-4 bg-white text-black font-black rounded-xl hover:bg-blue-400 hover:scale-105 active:scale-95 transition-all duration-300 shadow-xl flex items-center gap-3"
+                className="group px-10 py-5 bg-white text-black font-black rounded-2xl hover:bg-blue-500 hover:text-white hover:scale-105 active:scale-95 transition-all duration-300 shadow-[0_0_40px_rgba(255,255,255,0.2)] flex items-center gap-4"
               >
-                {isLoading ? 'SYNCING...' : 'INITIALIZE'}
+                {isLoading ? 'SYNCING CORE...' : 'INITIATE NEURAL LINK'}
               </button>
             ) : (
-              <div className="px-4 py-2 glass-morphism rounded-xl border-green-500/30 flex items-center gap-3">
-                <div className="w-2 h-2 bg-green-500 rounded-full animate-ping" />
-                <span className="text-[10px] font-black tracking-widest text-green-400">SYNC ACTIVE</span>
+              <div className="px-6 py-3 glass-morphism rounded-2xl border-green-500/40 flex items-center gap-4 hud-glow">
+                <div className="w-2.5 h-2.5 bg-green-500 rounded-full animate-ping" />
+                <span className="text-[11px] font-black tracking-widest text-green-400">DATA SYNC ACTIVE</span>
               </div>
             )}
           </div>
         </div>
 
-        {/* Center Prompt */}
-        {!isLive && !isLoading && (
-          <div className="flex flex-col items-center justify-center flex-grow opacity-60">
-            <div className="w-16 h-16 border-2 border-dashed border-white/20 rounded-full animate-spin mb-4" />
-            <p className="text-xs tracking-[0.3em] font-medium text-white/40 uppercase">Awaiting Biometric Data</p>
+        {/* Footer Data */}
+        <div className="flex justify-between items-end border-t border-white/5 pt-10">
+          <div className="flex gap-12 text-[10px] font-black text-white/40 tracking-[0.3em] uppercase">
+            <div className="flex items-center gap-3"><span className="w-1.5 h-1.5 bg-orange-500 rounded-full" /> ENGINE: VOLUMETRIC_V3</div>
+            <div className="flex items-center gap-3"><span className="w-1.5 h-1.5 bg-blue-500 rounded-full" /> LINK: GEMINI_CORE_LATEST</div>
           </div>
-        )}
-
-        {/* Status Display */}
-        <div className="flex justify-between items-end border-t border-white/5 pt-8">
-          <div className="hidden md:flex gap-10 text-[9px] font-black text-white/30 tracking-[0.2em] uppercase">
-            <div><span className="text-orange-500 mr-2">DIMENSION</span> 3D VOLUMETRIC</div>
-            <div><span className="text-orange-500 mr-2">LATENCY</span> 0.2MS</div>
-            <div><span className="text-orange-500 mr-2">ENGINE</span> GEMINI CORE 2.5</div>
-          </div>
-          
-          <div className="text-[9px] font-bold text-white/20 tracking-tighter">
-            PROTOTYPE V3.0 // QUANTUM INTERFACE
+          <div className="text-[10px] font-bold text-gray-700 tracking-tighter">
+            DESIGNED BY NEURAL EXPLORATION UNIT // 2025
           </div>
         </div>
       </div>
 
-      {/* Camera PiP Preview Overlay (Bottom Right) */}
+      {/* Floating Camera PiP HUD (Bottom Right) */}
       {isLive && (
-        <div className="absolute bottom-10 right-10 pointer-events-auto group">
-          <div className="relative w-48 h-36 md:w-64 md:h-48 glass-morphism rounded-3xl overflow-hidden border-2 border-white/20 shadow-2xl transition-all group-hover:scale-105 group-hover:border-blue-500/50">
+        <div className="absolute bottom-12 right-12 pointer-events-auto animate-in slide-in-from-right-10 duration-500">
+          <div className="relative w-64 h-48 md:w-80 md:h-60 glass-morphism rounded-[2.5rem] overflow-hidden border-2 border-white/20 hud-glow group hover:border-blue-500/50 transition-all">
+            
+            {/* Camera Feed */}
             <video 
               ref={videoRef} 
               autoPlay 
               muted 
               playsInline 
-              className="w-full h-full object-cover grayscale opacity-60 brightness-125 transition-all group-hover:grayscale-0 group-hover:opacity-100"
+              className="w-full h-full object-cover grayscale opacity-50 brightness-150 mix-blend-screen group-hover:grayscale-0 group-hover:opacity-80 transition-all"
             />
             <canvas ref={canvasRef} width={320} height={240} className="hidden" />
             
-            {/* Overlay Info */}
-            <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent p-3 flex justify-between items-end">
+            {/* Scanned Data Overlay */}
+            <div className="absolute inset-0 pointer-events-none">
+                <div className="absolute top-4 left-4 flex gap-2">
+                    <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse" />
+                    <div className="text-[8px] font-black tracking-widest text-blue-400 uppercase">Scanning Biometrics...</div>
+                </div>
+                
+                {/* Visual HUD Brackets */}
+                <div className="absolute inset-6 border border-white/5 rounded-2xl" />
+                <div className="absolute top-4 right-4 text-[10px] font-mono text-white/20">720P / 15FPS</div>
+            </div>
+
+            {/* Captured Gesture Banner */}
+            <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-[#010206] via-black/80 to-transparent p-6 flex justify-between items-end">
               <div className="space-y-1">
-                <div className="text-[8px] font-black text-blue-400 uppercase tracking-widest">Gesture Map</div>
-                <div className="text-xs md:text-lg font-mono font-black text-white uppercase italic truncate">
-                  {currentGesture === GalaxyGesture.STOP ? 'STANDBY' : currentGesture.replace('_', ' ')}
+                <div className="text-[9px] font-black text-blue-500 uppercase tracking-widest mb-1 italic">Gesture Detected</div>
+                <div className="text-2xl md:text-3xl font-mono font-black text-white uppercase italic tracking-tighter drop-shadow-lg">
+                  {currentGesture === GalaxyGesture.STOP ? <span className="text-white/30">Standby</span> : currentGesture.replace('_', ' ')}
                 </div>
               </div>
-              <div className="flex flex-col items-end">
-                 <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse mb-1" />
-                 <span className="text-[7px] font-bold text-white/50 tracking-widest">REC</span>
+              <div className="flex flex-col items-end gap-1">
+                 <div className="w-3 h-3 bg-red-600 rounded-full animate-pulse shadow-[0_0_10px_rgba(220,38,38,0.5)]" />
+                 <span className="text-[8px] font-black text-white/50 tracking-widest">LIVE</span>
               </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* Help Manual Overlay */}
+      {/* Help Manual Modal */}
       {showManual && (
-        <div className="absolute inset-0 z-[60] manual-overlay flex items-center justify-center p-6" onClick={() => setShowManual(false)}>
-          <div className="max-w-xl w-full glass-morphism rounded-[3rem] p-12 border-white/20 animate-in zoom-in-95 duration-300" onClick={e => e.stopPropagation()}>
-            <div className="flex justify-between items-start mb-10">
-              <h2 className="text-4xl font-black italic tracking-tighter">COMMAND PROTOCOLS</h2>
-              <button onClick={() => setShowManual(false)} className="p-2 hover:bg-white/10 rounded-full">
-                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        <div className="absolute inset-0 z-[100] manual-overlay flex items-center justify-center p-6 animate-in fade-in duration-300" onClick={() => setShowManual(false)}>
+          <div className="max-w-2xl w-full glass-morphism rounded-[3.5rem] p-16 border-white/20 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-12">
+              <h2 className="text-5xl font-black italic tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-white">USER PROTOCOLS</h2>
+              <button onClick={() => setShowManual(false)} className="p-3 hover:bg-white/10 rounded-full transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
               </button>
             </div>
             
-            <div className="grid grid-cols-2 gap-8 text-sm">
-              <div className="space-y-4">
-                <div className="p-4 bg-white/5 rounded-2xl border border-white/5">
-                  <span className="text-orange-500 font-bold block text-[10px] mb-1">ZOOM IN</span>
-                  <p className="text-gray-400">Move both hands closer to the camera lens.</p>
+            <div className="grid grid-cols-2 gap-10">
+              <div className="space-y-6">
+                <div className="p-6 bg-white/5 rounded-3xl border border-white/5">
+                  <span className="text-blue-500 font-black block text-xs mb-2 tracking-widest uppercase">Depth Navigation</span>
+                  <p className="text-gray-400 text-sm leading-relaxed">Push both hands toward the lens to <span className="text-white font-bold">Zoom In</span>. Pull back to <span className="text-white font-bold">Zoom Out</span>.</p>
                 </div>
-                <div className="p-4 bg-white/5 rounded-2xl border border-white/5">
-                  <span className="text-orange-500 font-bold block text-[10px] mb-1">ZOOM OUT</span>
-                  <p className="text-gray-400">Move both hands away from the lens.</p>
-                </div>
-                <div className="p-4 bg-white/5 rounded-2xl border border-white/5">
-                  <span className="text-orange-500 font-bold block text-[10px] mb-1">PAN AXIS</span>
-                  <p className="text-gray-400">Wave hand Left, Right, Up, or Down.</p>
+                <div className="p-6 bg-white/5 rounded-3xl border border-white/5">
+                  <span className="text-blue-500 font-black block text-xs mb-2 tracking-widest uppercase">Lateral Sweep</span>
+                  <p className="text-gray-400 text-sm leading-relaxed">Wave a single hand <span className="text-white font-bold">Left/Right/Up/Down</span> to pan the cosmic camera.</p>
                 </div>
               </div>
-              <div className="space-y-4">
-                 <div className="p-4 bg-white/5 rounded-2xl border border-white/5">
-                  <span className="text-orange-500 font-bold block text-[10px] mb-1">STOP/IDLE</span>
-                  <p className="text-gray-400">Hold your palm flat and still facing the camera.</p>
+              <div className="space-y-6">
+                 <div className="p-6 bg-white/5 rounded-3xl border border-white/5">
+                  <span className="text-blue-500 font-black block text-xs mb-2 tracking-widest uppercase">Interface Lock</span>
+                  <p className="text-gray-400 text-sm leading-relaxed">Hold an <span className="text-white font-bold">Open Palm Still</span> to neutralize all motion and lock current position.</p>
                 </div>
-                <div className="p-4 bg-blue-500/10 rounded-2xl border border-blue-500/20">
-                  <span className="text-blue-400 font-bold block text-[10px] mb-1">PRO TIP</span>
-                  <p className="text-white/80">Keep your background simple for maximum gesture tracking precision.</p>
+                <div className="p-6 bg-orange-500/10 rounded-3xl border border-orange-500/20">
+                  <span className="text-orange-500 font-black block text-xs mb-2 tracking-widest uppercase">Optimal Results</span>
+                  <p className="text-white/80 text-sm">Ensure your hands are clearly visible and well-lit against a neutral background.</p>
                 </div>
               </div>
             </div>
             
             <button 
               onClick={() => setShowManual(false)}
-              className="w-full mt-10 py-4 bg-white text-black font-black rounded-2xl hover:bg-blue-400 transition-all"
+              className="w-full mt-12 py-6 bg-white text-black font-black rounded-[2rem] hover:bg-blue-500 hover:text-white transition-all text-xl italic"
             >
-              ENGAGE
+              RESUME SYSTEM
             </button>
           </div>
         </div>
       )}
 
-      {/* Error State Overlay */}
+      {/* Error / Recovery State */}
       {error && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-2xl">
-          <div className="glass-morphism rounded-[3rem] p-16 max-w-md text-center border-red-500/30">
-            <h2 className="text-3xl font-black mb-4 text-white italic">SENSOR FAILURE</h2>
-            <p className="text-gray-400 mb-10 leading-relaxed font-medium">{error}</p>
+        <div className="absolute inset-0 z-[200] flex items-center justify-center bg-black/95 backdrop-blur-3xl animate-in fade-in duration-500">
+          <div className="glass-morphism rounded-[4rem] p-20 max-w-lg text-center border-red-500/30">
+            <div className="w-20 h-20 bg-red-600/20 text-red-500 rounded-full flex items-center justify-center mx-auto mb-10 text-4xl font-black">!</div>
+            <h2 className="text-4xl font-black mb-4 text-white italic tracking-tighter">NEURAL LINK FAILED</h2>
+            <p className="text-gray-500 mb-12 leading-relaxed font-medium px-4">{error}</p>
             <button 
               onClick={resetSystem} 
-              className="w-full py-5 bg-red-600 hover:bg-red-500 text-white font-black rounded-2xl transition-all shadow-lg active:scale-95"
+              className="w-full py-6 bg-red-600 hover:bg-red-500 text-white font-black rounded-[2rem] transition-all shadow-2xl active:scale-95"
             >
-              REBOOT SYSTEM
+              REBOOT NEURAL CORE
             </button>
           </div>
         </div>
